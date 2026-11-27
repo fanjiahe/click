@@ -1199,6 +1199,84 @@ def test_missing_envvar_sequence(runner, envvar, expected):
     assert f"Error: Missing option {expected}." in result.output
 
 
+def test_show_envvar_error_hint_auto_prefix(runner):
+    @click.command(context_settings={"auto_envvar_prefix": "MYAPP"})
+    @click.option("--port", type=int, required=True, show_envvar=True)
+    def cli(port):
+        click.echo(f"port={port}")
+
+    result = runner.invoke(cli, [])
+    assert result.exit_code == 2
+    assert "Error: Missing option '--port' (env var: 'MYAPP_PORT')." in result.output
+
+    bad_cli_result = runner.invoke(cli, ["--port", "not-an-int"])
+    assert bad_cli_result.exit_code == 2
+    assert (
+        "Invalid value for '--port' (env var: 'MYAPP_PORT'): "
+        "'not-an-int' is not a valid integer." in bad_cli_result.output
+    )
+
+    bad_env_result = runner.invoke(cli, [], env={"MYAPP_PORT": "not-an-int"})
+    assert bad_env_result.exit_code == 2
+    assert (
+        "Invalid value for '--port' (env var: 'MYAPP_PORT'): "
+        "'not-an-int' is not a valid integer." in bad_env_result.output
+    )
+
+
+def test_show_envvar_error_hint_auto_prefix_nested_and_disabled(runner):
+    @click.group()
+    def cli():
+        pass
+
+    @cli.command()
+    @click.option("--baz", required=True, show_envvar=True)
+    def foo_bar(baz):
+        pass
+
+    result = runner.invoke(cli, ["foo-bar"], auto_envvar_prefix="TEST")
+    assert result.exit_code == 2
+    assert (
+        "Error: Missing option '--baz' (env var: 'TEST_FOO_BAR_BAZ')." in result.output
+    )
+
+    no_auto = click.Command(
+        "cli",
+        params=[
+            click.Option(
+                ["--baz"],
+                required=True,
+                show_envvar=True,
+                allow_from_autoenv=False,
+            )
+        ],
+    )
+    no_auto_result = runner.invoke(no_auto, [], auto_envvar_prefix="TEST")
+    assert no_auto_result.exit_code == 2
+    assert "Error: Missing option '--baz'." in no_auto_result.output
+
+
+@pytest.mark.parametrize("envvar", [None, [], ""])
+def test_show_envvar_error_hint_empty_envvar_with_auto_prefix(runner, envvar):
+    option = click.Option(["--units"], envvar=envvar, show_envvar=True, required=True)
+    cli = click.Command("cli", params=[option])
+    result = runner.invoke(cli, [], auto_envvar_prefix="WEATHER")
+    assert result.exit_code == 2
+    assert (
+        "Error: Missing option '--units' (env var: 'WEATHER_UNITS')." in result.output
+    )
+
+
+def test_show_envvar_error_hint_explicit_overrides_auto_prefix(runner):
+    option = click.Option(
+        ["--port"], envvar="CUSTOM_PORT", show_envvar=True, required=True
+    )
+    cli = click.Command("cli", params=[option])
+    result = runner.invoke(cli, [], auto_envvar_prefix="MYAPP")
+    assert result.exit_code == 2
+    assert "Error: Missing option '--port' (env var: 'CUSTOM_PORT')." in result.output
+
+
 def test_case_insensitive_choice(runner):
     @click.command()
     @click.option("--foo", type=click.Choice(["Orange", "Apple"], case_sensitive=False))
